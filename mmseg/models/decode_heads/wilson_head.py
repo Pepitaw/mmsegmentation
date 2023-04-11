@@ -11,14 +11,40 @@ from mmseg.utils import SampleList, add_prefix
 from ..utils import SelfAttentionBlock as _SelfAttentionBlock
 from .decode_head import BaseDecodeHead
 
+class AxialHeightAtt(nn.Module):
+    # Axial Height Attention
 
+    def __init__(self):
+        super().__init__()
+        self.gamma = Scale(0)
+
+    def forward(self, x):
+        # Forward function.
+        batch_size, channels, height, width = x.size()
+        proj_query = x.permute(0, 3, 2, 1) # NWHC
+        proj_key = x.permute(0, 3, 1, 2) # NWCH
+        # energy = torch.bmm(proj_query, proj_key)
+        energy = torch.matmul(proj_query, proj_key) # NWHH
+        energy_new = torch.max(
+            energy, -1, keepdim=True)[0].expand_as(energy) - energy
+        attention = F.softmax(energy_new, dim=-1)
+        proj_value = x.permute(0, 3, 2, 1) # NWHC
+
+        # out = torch.bmm(attention, proj_value)
+        out = torch.matmul(attention, proj_value) # NWHC
+        out = out.permute(0, 3, 2, 1) # NCHW
+
+        out = torch.cat(self.gamma(out), x)
+        return out
+
+"""
 class PAM(_SelfAttentionBlock):
-    """Position Attention Module (PAM)
+    Position Attention Module (PAM)
 
     Args:
         in_channels (int): Input channels of key/query feature.
         channels (int): Output channels of key/query transform.
-    """
+    
 
     def __init__(self, in_channels, channels):
         super().__init__(
@@ -42,12 +68,12 @@ class PAM(_SelfAttentionBlock):
         self.gamma = Scale(0)
 
     def forward(self, x):
-        """Forward function."""
+        Forward function.
         out = super().forward(x, x)
 
         out = self.gamma(out) + x
         return out
-
+"""
 """
 class CAM(nn.Module):
     # Channel Attention Module (CAM)
@@ -96,9 +122,9 @@ class WHead(BaseDecodeHead):
             conv_cfg=self.conv_cfg,
             norm_cfg=self.norm_cfg,
             act_cfg=self.act_cfg)
-        self.pam = PAM(self.channels, pam_channels)
+        self.pam = AxialHeightAtt()
         self.pam_out_conv = ConvModule(
-            self.channels,
+            self.channels*2, # concate
             self.channels,
             3,
             padding=1,
